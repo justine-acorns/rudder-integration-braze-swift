@@ -18,7 +18,7 @@ let package = Package(
             name: "RudderBraze",
             dependencies: [
                 .product(name: "Rudder", package: "rudder-sdk-ios"),
-                .product(name: "BrazeKitCompat", package: "braze-swift-sdk"),
+                .product(name: "BrazeKit", package: "braze-swift-sdk"),
             ],
             path: "Sources",
             sources: ["Classes"],

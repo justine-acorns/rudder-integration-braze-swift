@@ -7,12 +7,14 @@
 
 import Foundation
 import Rudder
-import BrazeKitCompat
+import BrazeKit
+import UIKit
 
 class RSBrazeDestination: RSDestinationPlugin {
     let type = PluginType.destination
     let key = "Braze"
     var client: RSClient?
+    var braze: Braze?
     var controller = RSController()
         
     func update(serverConfig: RSServerConfig, type: UpdateType) { // swiftlint:disable:this cyclomatic_complexity
@@ -22,84 +24,88 @@ class RSBrazeDestination: RSDestinationPlugin {
             return
         }
         if !brazeConfig.appKey.isEmpty {
-            var appboyOptions = [String: Any]()
             let customEndpoint = brazeConfig.dataCenter.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+            var endPoint: String?
             switch customEndpoint {
             case "US-01":
-                appboyOptions[ABKEndpointKey] = "sdk.iad-01.braze.com"
+                endPoint = "sdk.iad-01.braze.com"
             case "US-02":
-                appboyOptions[ABKEndpointKey] = "sdk.iad-02.braze.com"
+                endPoint = "sdk.iad-02.braze.com"
             case "US-03":
-                appboyOptions[ABKEndpointKey] = "sdk.iad-03.braze.com"
+                endPoint = "sdk.iad-03.braze.com"
             case "US-04":
-                appboyOptions[ABKEndpointKey] = "sdk.iad-04.braze.com"
+                endPoint = "sdk.iad-04.braze.com"
             case "US-05":
-                appboyOptions[ABKEndpointKey] = "sdk.iad-05.braze.com"
+                endPoint = "sdk.iad-05.braze.com"
             case "US-06":
-                appboyOptions[ABKEndpointKey] = "sdk.iad-06.braze.com"
+                endPoint = "sdk.iad-06.braze.com"
             case "US-08":
-                appboyOptions[ABKEndpointKey] = "sdk.iad-08.braze.com"
+                endPoint = "sdk.iad-08.braze.com"
             case "EU-01":
-                appboyOptions[ABKEndpointKey] = "sdk.fra-01.braze.com"
+                endPoint = "sdk.fra-01.braze.com"
             case "EU-02":
-                appboyOptions[ABKEndpointKey] = "sdk.fra-02.braze.com"
+                endPoint = "sdk.fra-02.braze.com"
             default: break
             }
-            
-            // Refer here: https://www.braze.com/docs/developer_guide/platform_integration_guides/ios/initial_sdk_setup/other_sdk_customizations/#setting-log-level
-            appboyOptions[ABKLogLevelKey] = getLogLevel(from: client?.configuration?.logLevel)
-            
-            Appboy.start(withApiKey: brazeConfig.appKey, in: UIApplication.shared, withLaunchOptions: nil, withAppboyOptions: appboyOptions)
+
+            guard let endPoint else {
+                client?.log(message: "Failed to Initialize Braze", logLevel: .warning)
+                return
+            }
+
+            let configuration = Braze.Configuration(apiKey: brazeConfig.appKey, endpoint: endPoint)
+            let braze = Braze(configuration: configuration)
+            self.braze = braze
             client?.log(message: "Initializing Braze SDK.", logLevel: .debug)
         }
     }
     
     func identify(message: IdentifyMessage) -> IdentifyMessage? { // swiftlint:disable:this cyclomatic_complexity function_body_length
         if let userId = message.userId, !userId.isEmpty {
-            Appboy.sharedInstance()?.changeUser(userId)
+            braze?.changeUser(userId: userId)
         } else {
             if let externalIds = message.context?[RSKeys.Other.externalId] as? [[String: String]] {
                 if let externalIdDict = externalIds.first(where: { dict in
                     return dict["type"] == "brazeExternalId"
                 }), let id = externalIdDict["id"] {
-                    Appboy.sharedInstance()?.changeUser(id)
+                    braze?.changeUser(userId: id)
                 }
             }
         }
         if let traits = message.traits {
             if let lastName = traits[RSKeys.Identify.Traits.lastName] as? String {
-                Appboy.sharedInstance()?.user.lastName = lastName
+                braze?.user.set(lastName: lastName)
             }
             if let email = traits[RSKeys.Identify.Traits.email] as? String {
-                Appboy.sharedInstance()?.user.email = email
+                braze?.user.set(email: email)
             }
             if let firstName = traits[RSKeys.Identify.Traits.firstName] as? String {
-                Appboy.sharedInstance()?.user.firstName = firstName
+                braze?.user.set(firstName: firstName)
             }
             if let birthday = traits[RSKeys.Identify.Traits.birthday] as? String, let date: Date = dateFrom(isoDateString: birthday) {
-                Appboy.sharedInstance()?.user.dateOfBirth = date
+                braze?.user.set(dateOfBirth: date)
             }
             if let gender = traits[RSKeys.Identify.Traits.gender] as? String {
                 switch gender.lowercased() {
                 case "m", "male":
-                    Appboy.sharedInstance()?.user.setGender(.male)
+                    braze?.user.set(gender: .male)
                 case "f", "female":
-                    Appboy.sharedInstance()?.user.setGender(.female)
+                    braze?.user.set(gender: .female)
                 case "other":
-                    Appboy.sharedInstance()?.user.setGender(.other)
+                    braze?.user.set(gender: .other)
                 default:
-                    Appboy.sharedInstance()?.user.setGender(.unknown)
+                    braze?.user.set(gender: .unknown)
                 }
             }
             if let phone = traits[RSKeys.Identify.Traits.phone] as? String {
-                Appboy.sharedInstance()?.user.phone = phone
+                braze?.user.set(phoneNumber: phone)
             }
             if let address = traits[RSKeys.Identify.Traits.address] as? [String: Any] {
                 if let city = address[RSKeys.Identify.Traits.Address.city] as? String {
-                    Appboy.sharedInstance()?.user.homeCity = city
+                    braze?.user.set(homeCity: city)
                 }
                 if let country = address[RSKeys.Identify.Traits.Address.country] as? String {
-                    Appboy.sharedInstance()?.user.country = country
+                    braze?.user.set(country: country)
                 }
             }
             let appboyTraits = [
@@ -118,17 +124,17 @@ class RSBrazeDestination: RSDestinationPlugin {
                 }
                 switch value {
                 case let v as String:
-                    Appboy.sharedInstance()?.user.setCustomAttributeWithKey(key, andStringValue: v)
+                    braze?.user.setCustomAttribute(key: key, value: v)
                 case let v as Int:
-                    Appboy.sharedInstance()?.user.setCustomAttributeWithKey(key, andIntegerValue: v)
+                    braze?.user.setCustomAttribute(key: key, value: v)
                 case let v as Double:
-                    Appboy.sharedInstance()?.user.setCustomAttributeWithKey(key, andDoubleValue: v)
+                    braze?.user.setCustomAttribute(key: key, value: v)
                 case let v as Bool:
-                    Appboy.sharedInstance()?.user.setCustomAttributeWithKey(key, andBOOLValue: v)
-                case let v as [Any]:
-                    Appboy.sharedInstance()?.user.setCustomAttributeArrayWithKey(key, array: v)
+                    braze?.user.setCustomAttribute(key: key, value: v)
+                case let v as [String]:
+                    braze?.user.setCustomAttribute(key: key, array: v)
                 case let v as Date:
-                    Appboy.sharedInstance()?.user.setCustomAttributeWithKey(key, andDateValue: v)
+                    braze?.user.setCustomAttribute(key: key, value: v)
                 default:
                     break
                 }
@@ -140,13 +146,13 @@ class RSBrazeDestination: RSDestinationPlugin {
     func track(message: TrackMessage) -> TrackMessage? {
         if message.event == "Install Attributed" {
             if let campaign = message.properties?["campaign"] as? [String: Any] {
-                let attributionData: ABKAttributionData = ABKAttributionData(
+                let attributionData = Braze.User.AttributionData(
                     network: campaign["source"] as? String,
                     campaign: campaign["name"] as? String,
                     adGroup: campaign["ad_group"] as? String,
                     creative: campaign["ad_creative"] as? String
                 )
-                Appboy.sharedInstance()?.user.attributionData = attributionData
+                braze?.user.set(attributionData: attributionData)
             }
             return message
         }
@@ -158,44 +164,52 @@ class RSBrazeDestination: RSDestinationPlugin {
                             continue
                         }
                         // For logPurchase API refer to the Braze document: https://www.braze.com/docs/developer_guide/platform_integration_guides/ios/analytics/logging_purchases/#tracking-purchases-and-revenue
-                        Appboy.sharedInstance()?.logPurchase(productId, inCurrency: product.currency, atPrice: NSDecimalNumber(value: price), withQuantity: UInt(product.quantity), andProperties: product.properties)
+                        braze?.logPurchase(productId: productId, currency: product.currency, price: price, quantity: product.quantity, properties: product.properties)
                     }
                     return message
                 } else if let brazeList = getPurchase(from: properties),
                             let revenue = brazeList.revenue {
-                    Appboy.sharedInstance()?.logPurchase(message.event, inCurrency: brazeList.currency, atPrice: NSDecimalNumber(value: revenue), withQuantity: 1, andProperties: brazeList.properties)
+                    braze?.logPurchase(productId: message.event, currency: brazeList.currency, price: revenue, quantity: 1, properties: brazeList.properties)
                     return message
                 }
             }
         }
         // Custom event
         else {
-            Appboy.sharedInstance()?.logCustomEvent(message.event, withProperties: message.properties)
+            braze?.logCustomEvent(name: message.event, properties: message.properties)
         }
         return message
     }
     
     func flush() {
-        Appboy.sharedInstance()?.requestImmediateDataFlush()
+        braze?.requestImmediateDataFlush()
     }
 }
 
 extension RSBrazeDestination: RSPushNotifications {
     // Refer: https://www.braze.com/docs/developer_guide/platform_integration_guides/ios/push_notifications/integration/
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        Appboy.sharedInstance()?.registerDeviceToken(deviceToken)
+        braze?.notifications.register(deviceToken: deviceToken)
     }
         
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
-        Appboy.sharedInstance()?.register(application, didReceiveRemoteNotification: userInfo, fetchCompletionHandler: completionHandler)
+        guard braze?.notifications.handleBackgroundNotification(userInfo: userInfo, fetchCompletionHandler: completionHandler) == true
+        else {
+            completionHandler(.noData)
+            return
+        }
     }
     
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        Appboy.sharedInstance()?.userNotificationCenter(center, didReceive: response, withCompletionHandler: completionHandler)
+        guard braze?.notifications.handleUserNotification(response: response, withCompletionHandler: completionHandler) == true
+        else {
+            completionHandler()
+            return
+        }
     }
     
     func pushAuthorizationFromUserNotificationCenter(_ granted: Bool) {
-        Appboy.sharedInstance()?.pushAuthorization(fromUserNotificationCenter: granted)
+        //
     }
 }
 
